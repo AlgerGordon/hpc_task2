@@ -20,9 +20,8 @@ int main(int argc, char *argv[]) {
     double integral_approx;
     double x_rand, y_rand, z_rand;
     double func_sum;
-    int n_dots_per_iter = 100;
-    int n_dots = 0;
-    double cur_iteration_sum;
+    int64_t n_dots = 0;
+    double iteration_sum;
     int iterations = 0;
     double total_sum = 0.0;             // integral_approx = P_region_volume * (1.0 / iterations) * total_sum
     double error;                       // abs(integral_approx - exact_integral_value)
@@ -51,6 +50,14 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
+
+    // balance between common sense and precision
+    int64_t n_dots_per_cycle = (int) pow(2, (int) log2(1/eps));
+    int64_t n_dots_per_proc = n_dots_per_cycle;
+    if (num_procs > 1) {
+        n_dots_per_proc /= num_procs;
+        n_dots_per_proc *= 2;
+    }
     int my_seed = seed_bias * 100 + my_rank;
     srand(my_seed);
 
@@ -59,7 +66,7 @@ int main(int argc, char *argv[]) {
     do {
         iterations += 1;
         func_sum = 0;
-        for (size_t i = 0; i < n_dots_per_iter; ++i) {
+        for (size_t i = 0; i < n_dots_per_proc; ++i) {
             x_rand = (double) rand() / RAND_MAX;
             y_rand = (double) rand() / RAND_MAX;
             z_rand = (double) rand() / RAND_MAX;
@@ -70,12 +77,12 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        MPI_Reduce(&func_sum, &cur_iteration_sum, 1,
+        MPI_Reduce(&func_sum, &iteration_sum, 1,
                    MPI_DOUBLE, MPI_SUM, root, MPI_COMM_WORLD);
 
         if (my_rank == root) {
-            n_dots += n_dots_per_iter;
-            total_sum += (1.0 / num_procs) * cur_iteration_sum;
+            n_dots += n_dots_per_proc;
+            total_sum += (1.0 / num_procs) * iteration_sum;
             integral_approx = P_region_volume * (1.0 / n_dots) * total_sum;
             error = fabs(integral_approx - exact_integral_value);
         }
@@ -92,9 +99,9 @@ int main(int argc, char *argv[]) {
     if (my_rank == root) {
         printf("num_procs: %d, eps: %.10f, time: %.10f sec,"
                " integral approx value: %.10f, error: %.10f ,"
-               " dots generated: %d, seed_bias: %d\n",
+               " iterations: %d, dots generated: %ld, seed_bias: %d\n",
                num_procs, eps, max_duration, integral_approx,
-               error, num_procs * n_dots, seed_bias);
+               error, iterations, num_procs * n_dots, seed_bias);
     }
     return 0;
 }
